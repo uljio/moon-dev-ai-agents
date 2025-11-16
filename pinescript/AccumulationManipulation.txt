@@ -3,7 +3,7 @@ strategy("🌙 AccumulationManipulation - Moon Dev",
          overlay=true,
          initial_capital=100000,
          default_qty_type=strategy.percent_of_equity,
-         default_qty_value=100,
+         default_qty_value=10,
          commission_type=strategy.commission.percent,
          commission_value=0.2)
 
@@ -13,7 +13,7 @@ strategy("🌙 AccumulationManipulation - Moon Dev",
 // Performance: 0.73 Sharpe Ratio | +3.47% Return | -2.69% Max DD
 // Entry: Accumulation + Manipulation pattern + Fair value gap
 // Risk/Reward: 2.5:1 ratio
-// Trading Window: 10:00-11:30 (configurable)
+// Trading Window: Optional (10:00-11:30)
 // ============================================================================
 
 // === INPUTS ===
@@ -22,8 +22,8 @@ lookbackPeriod = input.int(20, "Accumulation Lookback Period", minval=10, maxval
 accumThresholdPct = input.float(2.0, "Accumulation Threshold (%)", minval=0.5, maxval=10.0, step=0.5)
 rewardRatio = input.float(2.5, "Risk/Reward Ratio", minval=1.0, maxval=5.0, step=0.5)
 
-// Trading window inputs (in hours, 24h format)
-enableTimeFilter = input.bool(false, "Enable Time Filter")
+// Trading window inputs (DISABLED by default for XAUUSD)
+enableTimeFilter = input.bool(false, "Enable Time Filter (for specific sessions)")
 startHour = input.int(10, "Start Hour", minval=0, maxval=23)
 startMinute = input.int(0, "Start Minute", minval=0, maxval=59)
 endHour = input.int(11, "End Hour", minval=0, maxval=23)
@@ -51,7 +51,11 @@ biasPeriod = 4
 isUptrend = close > close[1] and close[1] > close[2] and close[2] > close[3]
 isDowntrend = close < close[1] and close[1] < close[2] and close[2] < close[3]
 
-marketBias = isUptrend ? 1 : isDowntrend ? -1 : 0
+// Relaxed bias - just check if we're generally trending
+isUptrendRelaxed = close > close[biasPeriod]
+isDowntrendRelaxed = close < close[biasPeriod]
+
+marketBias = isUptrendRelaxed ? 1 : isDowntrendRelaxed ? -1 : 0
 
 // === ACCUMULATION DETECTION ===
 // Check if range is less than threshold% of average price
@@ -61,12 +65,12 @@ accumThreshold = avgPrice * (accumThresholdPct / 100)
 isAccumulation = accumRange < accumThreshold
 
 // === MANIPULATION PATTERN ===
-// Look for V-shaped reversal in last 3 candles
+// Look for V-shaped or inverted V reversal in last 3 candles
 // Bullish manipulation: price dips then recovers (for uptrend)
-bullishManipulation = close[2] > close[1] and close[1] < close and marketBias == 1
+bullishManipulation = close[2] > close[1] and close[1] < close and marketBias >= 0
 
 // Bearish manipulation: price spikes then falls (for downtrend)
-bearishManipulation = close[2] < close[1] and close[1] > close and marketBias == -1
+bearishManipulation = close[2] < close[1] and close[1] > close and marketBias <= 0
 
 // === ENTRY CONDITIONS ===
 longCondition = isAccumulation and bullishManipulation and inTimeWindow and strategy.position_size == 0
@@ -77,7 +81,7 @@ calcPositionSize(entry, stop) =>
     riskAmount = strategy.equity * (riskPerTrade / 100)
     riskPerUnit = math.abs(entry - stop)
     posSize = riskPerUnit > 0 ? riskAmount / riskPerUnit : 0
-    posSize
+    math.max(posSize, 1.0)
 
 // === TRADE EXECUTION ===
 var float entryPrice = na
@@ -111,31 +115,12 @@ if shortCondition
             strategy.entry("Short", strategy.short, qty=posSize)
 
 // === EXIT MANAGEMENT ===
-// Long exits
+// Use strategy.exit for proper order management
 if strategy.position_size > 0
-    if close >= takeProfit
-        strategy.close("Long", comment="TP Hit")
-        entryPrice := na
-        stopLoss := na
-        takeProfit := na
-    else if close <= stopLoss
-        strategy.close("Long", comment="SL Hit")
-        entryPrice := na
-        stopLoss := na
-        takeProfit := na
+    strategy.exit("Exit Long", "Long", limit=takeProfit, stop=stopLoss)
 
-// Short exits
 if strategy.position_size < 0
-    if close <= takeProfit
-        strategy.close("Short", comment="TP Hit")
-        entryPrice := na
-        stopLoss := na
-        takeProfit := na
-    else if close >= stopLoss
-        strategy.close("Short", comment="SL Hit")
-        entryPrice := na
-        stopLoss := na
-        takeProfit := na
+    strategy.exit("Exit Short", "Short", limit=takeProfit, stop=stopLoss)
 
 // === PLOTTING ===
 // Plot SMA
@@ -183,3 +168,7 @@ if barstate.islast
     table.cell(infoTable, 0, 4, "R:R Ratio", bgcolor=color.new(color.blue, 80))
     table.cell(infoTable, 1, 4, "1:" + str.tostring(rewardRatio, "#.#"),
                bgcolor=color.new(color.white, 80))
+
+// === ALERTS ===
+alertcondition(longCondition, "Long Entry", "🌙 Accumulation Manipulation: Long Signal!")
+alertcondition(shortCondition, "Short Entry", "🌙 Accumulation Manipulation: Short Signal!")

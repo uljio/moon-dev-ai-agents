@@ -3,7 +3,7 @@ strategy("🌙 ATR Mean Reversion - Moon Dev",
          overlay=true,
          initial_capital=100000,
          default_qty_type=strategy.percent_of_equity,
-         default_qty_value=100,
+         default_qty_value=10,
          commission_type=strategy.commission.percent,
          commission_value=0.2)
 
@@ -25,14 +25,11 @@ takeProfitMultiplier = input.float(1.5, "Take Profit (xATR)", minval=0.5, maxval
 stopLossMultiplier = input.float(1.0, "Stop Loss (xATR)", minval=0.5, maxval=3.0, step=0.1)
 
 // === KELTNER CHANNELS ===
-// Using Standard Deviation instead of ATR for channels (as per original code)
+// Using ATR for channels (proper Keltner Channels)
 kcMiddle = ta.sma(close, kcPeriod)
-kcStdDev = ta.stdev(close, kcPeriod)
-kcUpper = kcMiddle + (kcStdDev * kcMultiplier)
-kcLower = kcMiddle - (kcStdDev * kcMultiplier)
-
-// ATR for risk management
 atr = ta.atr(atrPeriod)
+kcUpper = kcMiddle + (atr * kcMultiplier)
+kcLower = kcMiddle - (atr * kcMultiplier)
 
 // === REVERSAL CANDLE PATTERNS ===
 // Bullish reversal: close > open (bullish candle)
@@ -42,11 +39,11 @@ isBullishCandle = close > open
 isBearishCandle = close < open
 
 // === ENTRY CONDITIONS ===
-// Long: Price below lower KC + bullish reversal candle
-longCondition = close < kcLower and isBullishCandle and strategy.position_size == 0
+// Long: Price pokes below lower KC + bullish reversal candle
+longCondition = (low < kcLower or close < kcLower) and isBullishCandle and strategy.position_size == 0
 
-// Short: Price above upper KC + bearish reversal candle
-shortCondition = close > kcUpper and isBearishCandle and strategy.position_size == 0
+// Short: Price pokes above upper KC + bearish reversal candle
+shortCondition = (high > kcUpper or close > kcUpper) and isBearishCandle and strategy.position_size == 0
 
 // === POSITION SIZING ===
 calcPositionSize(entry, stop) =>
@@ -79,31 +76,12 @@ if shortCondition
     strategy.entry("Short", strategy.short, qty=posSize)
 
 // === EXIT MANAGEMENT ===
-// Long exits
+// Use strategy.exit for proper TP/SL management
 if strategy.position_size > 0
-    if close >= takeProfit
-        strategy.close("Long", comment="TP Hit")
-        entryPrice := na
-        stopLoss := na
-        takeProfit := na
-    else if close <= stopLoss
-        strategy.close("Long", comment="SL Hit")
-        entryPrice := na
-        stopLoss := na
-        takeProfit := na
+    strategy.exit("Exit Long", "Long", limit=takeProfit, stop=stopLoss)
 
-// Short exits
 if strategy.position_size < 0
-    if close <= takeProfit
-        strategy.close("Short", comment="TP Hit")
-        entryPrice := na
-        stopLoss := na
-        takeProfit := na
-    else if close >= stopLoss
-        strategy.close("Short", comment="SL Hit")
-        entryPrice := na
-        stopLoss := na
-        takeProfit := na
+    strategy.exit("Exit Short", "Short", limit=takeProfit, stop=stopLoss)
 
 // === PLOTTING ===
 // Plot Keltner Channels
@@ -149,10 +127,5 @@ if barstate.islast
     table.cell(infoTable, 1, 5, str.tostring(distFromLower, "#.##") + "%", bgcolor=color.new(color.white, 80))
 
 // === ALERTS ===
-// Alert conditions
 alertcondition(longCondition, "Long Entry Alert", "🌙 ATR Mean Reversion: Long Entry Signal!")
 alertcondition(shortCondition, "Short Entry Alert", "🌙 ATR Mean Reversion: Short Entry Signal!")
-alertcondition(strategy.position_size > 0 and close >= takeProfit, "Long TP Hit", "🌙 Long Take Profit Hit!")
-alertcondition(strategy.position_size < 0 and close <= takeProfit, "Short TP Hit", "🌙 Short Take Profit Hit!")
-alertcondition(strategy.position_size > 0 and close <= stopLoss, "Long SL Hit", "🌙 Long Stop Loss Hit!")
-alertcondition(strategy.position_size < 0 and close >= stopLoss, "Short SL Hit", "🌙 Short Stop Loss Hit!")
